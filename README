@@ -1,1 +1,5 @@
+Simple support for Go testing with a live Postgres database
+----
 
+This package makes it straightforward to write tests that connect
+to a fresh Postgres database created for the tests.
