@@ -15,7 +15,8 @@ func TestNew(t *testing.T) {
 	c := qt.New(t)
 	db, err := postgrestest.New()
 	c.Assert(err, qt.Equals, nil)
-	name := db.Name()
+
+	schema := db.Schema()
 	// Check that we can actually use it.
 	_, err = db.Exec(`CREATE TABLE x (id text, val text)`)
 	c.Assert(err, qt.Equals, nil)
@@ -28,12 +29,13 @@ func TestNew(t *testing.T) {
 	err = db.Close()
 	c.Assert(err, qt.Equals, nil)
 
-	// Check that we can't open the database any more.
-	sdb, err := sql.Open("postgres", "dbname="+name)
-	if err == nil {
-		// Open doesn't necessarily verify that the database
-		// is open, so Ping it to make sure.
-		err = sdb.Ping()
-	}
-	c.Assert(err, qt.ErrorMatches, `.*database .* does not exist`, qt.Commentf("name %q", name))
+	// Connect again and check that the schema has been deleted.
+	sdb, err := sql.Open("postgres", "")
+	c.Assert(err, qt.Equals, nil)
+	defer sdb.Close()
+
+	row = db.QueryRow(`SELECT COUNT(nspname) FROM pg_namespace WHERE nspname = '` + schema + `'`)
+	var count int
+	c.Assert(row.Scan(&count), qt.Equals, nil)
+	c.Assert(count, qt.Equals, 0)
 }
