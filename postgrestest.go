@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 	"gopkg.in/errgo.v1"
@@ -60,8 +61,21 @@ func New() (*DB, error) {
 // Close closes the database connection and removes
 // the test database.
 func (pg *DB) Close() error {
-	if _, err := pg.DB.Exec(fmt.Sprintf("DROP SCHEMA %q CASCADE;", pg.schema)); err != nil {
-		return errgo.Notef(err, "cannot drop test schema %q", pg.schema)
+	// Drop the schema in a goroutine so that if it fails because some goroutine is maintaining
+	// a lock on a table, we can time out instead of hanging up indefinitely
+	done := make(chan error)
+	go func() {
+		_, err := pg.DB.Exec(fmt.Sprintf("DROP SCHEMA %q CASCADE;", pg.schema))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return errgo.Notef(err, "cannot drop test schema %q", pg.schema)
+		}
+		return nil
+	case <-time.After(5 * time.Second):
+		return errgo.Newf("timed out trying to drop test schema %q", pg.schema)
 	}
 	return nil
 }
