@@ -1,0 +1,9 @@
+language: go
+go_import_path: "github.com/juju/postgrestest"
+go: 
+  - "1.11"
+script: GO111MODULE=on go test ./...
+services:
+  - postgresql
+addons:
+  postgresql: "9.5"
