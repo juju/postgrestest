@@ -13,7 +13,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"gopkg.in/errgo.v1"
+	errgo "gopkg.in/errgo.v1"
 )
 
 // DB holds a connection to a schema within
@@ -39,6 +39,10 @@ var ErrDisabled = errgo.New("postgres testing is disabled")
 //
 // If the environment variable PGTESTDISABLE is non-empty
 // ErrDisabled will be returned.
+//
+// If the environment variable PGTESTKEEPDB is non-empty,
+// the name of the test schema will be printed and the
+// data will not be deleted.
 func New() (*DB, error) {
 	if os.Getenv("PGTESTDISABLE") != "" {
 		return nil, ErrDisabled
@@ -61,6 +65,12 @@ func New() (*DB, error) {
 // Close closes the database connection and removes
 // the test database.
 func (pg *DB) Close() error {
+	if os.Getenv("PGTESTKEEPDB") != "" {
+		fmt.Fprintf(os.Stderr, "postgrestest schema: %v\n", pg.schema)
+		fmt.Fprintf(os.Stderr, "Use: SET search_path TO %q\n", pg.schema)
+		fmt.Fprintf(os.Stderr, "Remove: DROP SCHEMA %q CASCADE;\n", pg.schema)
+		return nil
+	}
 	// Drop the schema in a goroutine so that if it fails because some goroutine is maintaining
 	// a lock on a table, we can time out instead of hanging up indefinitely
 	done := make(chan error)
