@@ -67,8 +67,8 @@ func New() (*DB, error) {
 func (pg *DB) Close() error {
 	if os.Getenv("PGTESTKEEPDB") != "" {
 		fmt.Fprintf(os.Stderr, "postgrestest schema: %v\n", pg.schema)
-		fmt.Fprintf(os.Stderr, "Use: SET search_path TO %q\n", pg.schema)
-		fmt.Fprintf(os.Stderr, "Remove: DROP SCHEMA %q CASCADE;\n", pg.schema)
+		fmt.Fprintf(os.Stderr, "\tSET search_path TO %q;\n", pg.schema)
+		fmt.Fprintf(os.Stderr, "\tDROP SCHEMA %q CASCADE;\n", pg.schema)
 		return nil
 	}
 	// Drop the schema in a goroutine so that if it fails because some goroutine is maintaining
