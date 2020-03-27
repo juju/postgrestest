@@ -16,6 +16,14 @@ import (
 	errgo "gopkg.in/errgo.v1"
 )
 
+const defaultTimeout = 5 * time.Second
+
+// PgTestDisable returns whether Postgres should be disabled based on the
+// PGTESTDISABLE environment variable.
+func PgTestDisable() bool {
+	return os.Getenv("PGTESTDISABLE") != ""
+}
+
 // DB holds a connection to a schema within
 // a Postgres database. The schema is created by New
 // and deleted (along with all the tables) when the DB is closed.
@@ -43,8 +51,20 @@ var ErrDisabled = errgo.New("postgres testing is disabled")
 // If the environment variable PGTESTKEEPDB is non-empty,
 // the name of the test schema will be printed and the
 // data will not be deleted.
+//
+// For optimal test performance, we recommend setting
+// the following Postgres config values in your testing
+// or development environment (BUT NEVER IN PRODUCTION):
+//
+//   fsync = off
+//   synchronous_commit = off
+//   full_page_writes = off
+//
+// Be aware that these settings may lead to data loss
+// and corruption. However, they should not have any
+// negative impact on ephemeral tests.
 func New() (*DB, error) {
-	if os.Getenv("PGTESTDISABLE") != "" {
+	if PgTestDisable() {
 		return nil, ErrDisabled
 	}
 	name := randomSchemaName()
@@ -52,8 +72,19 @@ func New() (*DB, error) {
 	if err != nil {
 		return nil, errgo.Notef(err, "cannot open database")
 	}
-	_, err = db.Exec(`CREATE SCHEMA ` + name)
+
+	err = runWithTimeout(func(done chan error) {
+		_, err := db.Exec(`CREATE SCHEMA ` + name)
+		done <- err
+	}, defaultTimeout, "create schema")
 	if err != nil {
+		errClose := runWithTimeout(func(done chan error) {
+			db.Close()
+			done <- err
+		}, defaultTimeout, "close test db after failing to create schema")
+		if errClose != nil {
+			return nil, errgo.Notef(errClose, "cannot create test database %q", name)
+		}
 		return nil, errgo.Notef(err, "cannot create test database %q", name)
 	}
 	return &DB{
@@ -62,32 +93,59 @@ func New() (*DB, error) {
 	}, nil
 }
 
-// Close closes the database connection and removes
-// the test database.
+// Close removes the test database and closes the database connection. This
+// method should not be called from multiple goroutines.
 func (pg *DB) Close() error {
+	// If for some reason someone replaced our DB with nil, there's nothing to
+	// do here.
+	if pg.DB == nil {
+		return nil
+	}
+
 	if os.Getenv("PGTESTKEEPDB") != "" {
 		fmt.Fprintf(os.Stderr, "postgrestest schema: %v\n", pg.schema)
 		fmt.Fprintf(os.Stderr, "\tSET search_path TO %q;\n", pg.schema)
 		fmt.Fprintf(os.Stderr, "\tDROP SCHEMA %q CASCADE;\n", pg.schema)
 		return nil
 	}
-	// Drop the schema in a goroutine so that if it fails because some goroutine is maintaining
-	// a lock on a table, we can time out instead of hanging up indefinitely
-	done := make(chan error)
-	go func() {
+
+	// Drop the schema and close in goroutines, so that if it fails because
+	// someone has a lock on something, we can time out instead of hanging up
+	// indefinitely.
+	err := runWithTimeout(func(done chan error) {
 		_, err := pg.DB.Exec(fmt.Sprintf("DROP SCHEMA %q CASCADE;", pg.schema))
 		done <- err
-	}()
+	}, defaultTimeout, "drop test schema "+pg.schema)
+	if err != nil {
+		return err
+	}
+
+	err = runWithTimeout(func(done chan error) {
+		err := pg.DB.Close()
+		done <- err
+	}, defaultTimeout, "close test db")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// runWithTimeout runs toRun in a goroutine and waits for it to finish
+// (up to timeout) and what describes the thing toRun is trying to accomplish
+// (for nicer error messages).
+func runWithTimeout(toRun func(chan error), timeout time.Duration, what string) error {
+	done := make(chan error)
+	go toRun(done)
 	select {
 	case err := <-done:
 		if err != nil {
-			return errgo.Notef(err, "cannot drop test schema %q", pg.schema)
+			return errgo.Notef(err, "cannot "+what)
 		}
 		return nil
-	case <-time.After(5 * time.Second):
-		return errgo.Newf("timed out trying to drop test schema %q", pg.schema)
+	case <-time.After(timeout):
+		return errgo.Newf("timed out trying to " + what)
 	}
-	return nil
 }
 
 // Schema returns the test schema name.
