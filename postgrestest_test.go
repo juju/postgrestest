@@ -34,7 +34,7 @@ func TestNew(t *testing.T) {
 	c.Assert(err, qt.Equals, nil)
 	defer sdb.Close()
 
-	row = db.QueryRow(`SELECT COUNT(nspname) FROM pg_namespace WHERE nspname = '` + schema + `'`)
+	row = sdb.QueryRow(`SELECT COUNT(nspname) FROM pg_namespace WHERE nspname = '` + schema + `'`)
 	var count int
 	c.Assert(row.Scan(&count), qt.Equals, nil)
 	c.Assert(count, qt.Equals, 0)
