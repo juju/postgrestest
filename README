@@ -3,3 +3,23 @@ Simple support for Go testing with a live Postgres database
 
 This package makes it straightforward to write tests that connect
 to a fresh Postgres database created for the tests.
+
+## Set up ##
+In order to use pgtest, you'll need to setup your postgres user as follow:
+
+```
+sudo -u postgres createuser someuser
+sudo -u postgres psql
+psql (10.5 (Ubuntu 10.5-0ubuntu0.18.04))
+Type "help" for help.
+
+postgres=# alter user someuser with password 'somepassword';
+ALTER ROLE
+postgres=# create database someuser;
+CREATE DATABASE
+postgres=# grant all on database someuser to someuser;
+GRANT
+postgres=# \q
+export PGPASSWORD=somepassword
+export PGUSER=someuser
+```
